@@ -35,5 +35,7 @@ COPY workspace/ $WORKSPACE_PATH/src/
 RUN rosdep update && cd $WORKSPACE_PATH && \
     rosdep install --from-paths src -y --ignore-src
 
+RUN apt-get update && apt-get install -y x11-apps
+
 COPY scripts/setup/ /root/scripts/setup
 RUN /root/scripts/setup/workspace.sh

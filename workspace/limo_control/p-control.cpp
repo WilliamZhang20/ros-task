@@ -50,10 +50,8 @@ private:
   void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
     // Extract position and velocity info from Odometry
-    x = msg->pose.pose.position.x;
-    y = msg->pose.pose.position.y;
-    linear_vel = msg->twist.twist.linear.x;
-    angular_vel = msg->twist.twist.angular.z;
+    currPoint = msg->pose.pose.position;   
+    currPose = msg->pose.pose;
 
     // Log the current position and velocity
     RCLCPP_INFO(this->get_logger(), "Odometry received: Position (%f, %f), Linear Velocity: %f, Angular Velocity: %f",
@@ -63,12 +61,12 @@ private:
   }
 
 
- void quaternionToeuler(const geometry_msgs::msg::Pose::SharedPtr quatPose, double &yaw, double &roll, double &pitch){
+ void quaternionToEuler(double &yaw, double &roll, double &pitch){
     tf2::Quaternion q(
-        quatPose->orientation.x,
-        quatPose->orientation.y,
-        quatPose->orientation.z,
-        quatPose->orientation.w
+        currPose->orientation.x,
+        currPose->orientation.y,
+        currPose->orientation.z,
+        currPose->orientation.w
     );
 
     tf2::Matrix3x3 m(q);
@@ -79,10 +77,18 @@ private:
 
   void computeOutput() {
     // Compute eulerian orientation from quaternion
+    double yaw, roll, pitch;
+
+    quaternionToEuler(yaw, roll, pitch);
 
     // If state FindPoint & NaN horizonHeading - determine horizonHeading 
+    if(goalPoint == TravelState::FindPoint && horizonHeading == std::nanf("")) {
+
+    }
 
     // If state FindPoint & are lined up with horizonHeading - switch to en route
+    
+
 
     // If state en route & at point - switch arrived
 
@@ -94,8 +100,8 @@ private:
   float dirOutput = 0.0f; 
   float pwrOutput = 0.0f;
 
-  float x; float y;
-  float linear_vel; float angular_vel;
+  geometry_msgs::msg::Point currPoint;
+  geometry_msgs::msg::Pose currPose;
 
   // direction to head to reach the point!
   float horizonHeading = std::nanf("");
