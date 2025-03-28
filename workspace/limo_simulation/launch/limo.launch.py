@@ -33,6 +33,11 @@ def generate_launch_description():
         }.items()
     )
 
+    robot_controller = Node(
+        package="limo_control",
+        executable="control_node"
+    )
+
     robot_state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
@@ -85,5 +90,6 @@ def generate_launch_description():
         robot_state_publisher,
         gz_spawn_entity,
         gz_sim,
-        gz_ros2_bridge
+        gz_ros2_bridge,
+        robot_controller
     ])
