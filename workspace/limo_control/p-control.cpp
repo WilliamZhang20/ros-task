@@ -30,20 +30,17 @@ public:
 
     goalPoint.x = 10;
     goalPoint.y = 10;
-    goalPoint.z = 0;
+    goalPoint.z = 0.3;
     goalPose = 2.3;
+
+    horizonHeading = -1;
 
     goal = TravelState::FindPoint;
   }
 private:
   void publish_cmd_vel() 
   {
-    geometry_msgs::msg::Twist ctrlSignal;
-
     // Based on applied ctrl algorithm
-    ctrlSignal.linear.x = 1.0;  // Forward speed in m/s
-    ctrlSignal.angular.z = 0.5; // Rotation speed in rad/s
-
     publisher_->publish(ctrlSignal);
   }
 
@@ -54,26 +51,38 @@ private:
     currPose = msg->pose.pose;
 
     // Log the current position and velocity
-    RCLCPP_INFO(this->get_logger(), "Odometry received: Position (%f, %f), Linear Velocity: %f, Angular Velocity: %f",
-                x, y, linear_vel, angular_vel);
+    RCLCPP_INFO(this->get_logger(), "Odometry received: Position (%f, %f), Linear Velocity: %f, Angular Velocity: %f", 
+         msg->pose.pose.position.x, msg->pose.pose.position.y, msg->twist.twist.linear.x, msg->twist.twist.angular.z);
 
     computeOutput();
   }
 
-
  void quaternionToEuler(double &yaw, double &roll, double &pitch){
     tf2::Quaternion q(
-        currPose->orientation.x,
-        currPose->orientation.y,
-        currPose->orientation.z,
-        currPose->orientation.w
+        currPose.orientation.x,
+        currPose.orientation.y,
+        currPose.orientation.z,
+        currPose.orientation.w
     );
 
     tf2::Matrix3x3 m(q);
     m.getRPY(roll, pitch, yaw);
 
     RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Current heading (yaw): %f radians", yaw);
-  };
+  }
+
+  float computeEuclideanDistance() {
+    float delta_x_squared = std::pow(goalPoint.x - currPoint.x, 2);
+    float delta_y_squared = std::pow(goalPoint.y - currPoint.y, 2);
+    float delta_z_squared = std::pow(goalPoint.z - currPoint.z, 2);
+
+    float summation = delta_x_squared + delta_y_squared + delta_z_squared;
+    return std::sqrt(summation); 
+  }
+
+  float findPointDirection() {
+    return std::atan2((goalPoint.y - currPoint.y), (goalPoint.x - currPoint.x));
+  }
 
   void computeOutput() {
     // Compute eulerian orientation from quaternion
@@ -81,20 +90,48 @@ private:
 
     quaternionToEuler(yaw, roll, pitch);
 
-    // If state FindPoint & NaN horizonHeading - determine horizonHeading 
-    if(goalPoint == TravelState::FindPoint && horizonHeading == std::nanf("")) {
+    double dirError = goalPose - yaw; 
 
+    float distError = computeEuclideanDistance();
+
+    // If state FindPoint & NaN horizonHeading - determine horizonHeading 
+    if(goal == TravelState::FindPoint) {
+      if(horizonHeading == -1) {
+        horizonHeading = findPointDirection(); 
+        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Computed horizonHeading to be %f", horizonHeading);
+      } // If state FindPoint & are lined up with horizonHeading - switch to en route
+      else if(std::abs(yaw - horizonHeading) < 0.001) {
+        goal = TravelState::EnRoute;
+        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "About to move!");
+      }
     }
 
-    // If state FindPoint & are lined up with horizonHeading - switch to en route
-    
-
-
     // If state en route & at point - switch arrived
+    if(goal == TravelState::EnRoute && std::abs(distError) < 0.01) {
+      goal = TravelState::Arrived;
+    }
 
-    // If FindPoint - adjust angle to vector between
-    // If EnRoute - adjust speed
+    // If FindPoint - adjust angle to horizon heading
+    if(goal == TravelState::FindPoint) {
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Adjusting direction init!");
+      ctrlSignal.angular.z = kpDirection*(std::abs(yaw - horizonHeading));
+      ctrlSignal.linear.x = 0; // do not move!
+    }
+
+    // If EnRoute - adjust speed to not overshoot the point
+    else if(goal == TravelState::EnRoute) {
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Moving towards goal");
+      ctrlSignal.linear.x = kpVelocity*distError;
+      ctrlSignal.angular.z = 0;
+    }
+
     // If arrived - adjust angle to final setpoint
+    else if(goal == TravelState::Arrived) {
+      ctrlSignal.angular.z = kpDirection*(std::abs(dirError));
+      ctrlSignal.linear.x = 0; // do not move!
+    }
+
+    RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Computed output to be %f and %f", ctrlSignal.angular.z, ctrlSignal.linear.x);
   }
 
   float dirOutput = 0.0f; 
@@ -104,14 +141,19 @@ private:
   geometry_msgs::msg::Pose currPose;
 
   // direction to head to reach the point!
-  float horizonHeading = std::nanf("");
+  float horizonHeading;
 
-  const float kpDirection = 1.5;
-  const float kpVelocity = 1.5;
+  const float kpDirection = 1.1;
+  const float kpVelocity = 0.01;
+
+  float error; // is only linear
 
   // control setpoint for desired state
   geometry_msgs::msg::Point goalPoint;
   float goalPose;
+
+  // Output control signal
+  geometry_msgs::msg::Twist ctrlSignal{};
 
   TravelState goal; // determines what to adjust!
 
