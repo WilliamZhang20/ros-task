@@ -11,6 +11,10 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 
+#include <fstream>
+#include <iostream>
+#include <string>
+
 enum class TravelState {
     FindPoint,
     EnRoute,
@@ -28,14 +32,17 @@ public:
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(10), std::bind(&RobotControlNode::publish_cmd_vel, this));
 
-    goalPoint.x = 10;
-    goalPoint.y = 10;
+    goalPoint.x = 9;
+    goalPoint.y = 9;
     goalPoint.z = 0.3;
     goalPose = 2.3;
 
     horizonHeading = -1;
 
     goal = TravelState::FindPoint;
+
+    // For plotting, we store data in a text file
+    fout.open("/root/workspace/src/data.txt", std::ios::app);
   }
 private:
   void publish_cmd_vel() 
@@ -50,9 +57,14 @@ private:
     currPoint = msg->pose.pose.position;   
     currPose = msg->pose.pose;
 
+    float x = msg->pose.pose.position.x;
+    float y = msg->pose.pose.position.y;
+
     // Log the current position and velocity
     RCLCPP_INFO(this->get_logger(), "Odometry received: Position (%f, %f), Linear Velocity: %f, Angular Velocity: %f", 
-         msg->pose.pose.position.x, msg->pose.pose.position.y, msg->twist.twist.linear.x, msg->twist.twist.angular.z);
+         x, y, msg->twist.twist.linear.x, msg->twist.twist.angular.z);
+ 
+    fout << x << " " << y << " ";
 
     computeOutput();
   }
@@ -74,9 +86,7 @@ private:
   float computeEuclideanDistance() {
     float delta_x_squared = std::pow(goalPoint.x - currPoint.x, 2);
     float delta_y_squared = std::pow(goalPoint.y - currPoint.y, 2);
-    float delta_z_squared = std::pow(goalPoint.z - currPoint.z, 2);
-
-    float summation = delta_x_squared + delta_y_squared + delta_z_squared;
+    float summation = delta_x_squared + delta_y_squared;
     return std::sqrt(summation); 
   }
 
@@ -88,11 +98,16 @@ private:
     // Compute eulerian orientation from quaternion
     double yaw, roll, pitch;
 
+    // Determine euler angles
     quaternionToEuler(yaw, roll, pitch);
+
+    fout << yaw << " ";
 
     double dirError = goalPose - yaw; 
 
     float distError = computeEuclideanDistance();
+
+    fout << distError << std::endl;
 
     // If state FindPoint & NaN horizonHeading - determine horizonHeading 
     if(goal == TravelState::FindPoint) {
@@ -107,20 +122,19 @@ private:
     }
 
     // If state en route & at point - switch arrived
-    if(goal == TravelState::EnRoute && std::abs(distError) < 0.01) {
+    if(goal == TravelState::EnRoute && distError < 0.02) {
       goal = TravelState::Arrived;
     }
 
     // If FindPoint - adjust angle to horizon heading
     if(goal == TravelState::FindPoint) {
-      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Adjusting direction init!");
       ctrlSignal.angular.z = kpDirection*(std::abs(yaw - horizonHeading));
       ctrlSignal.linear.x = 0; // do not move!
     }
 
     // If EnRoute - adjust speed to not overshoot the point
     else if(goal == TravelState::EnRoute) {
-      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Moving towards goal");
+      RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Moving towards goal with %f to go", distError);
       ctrlSignal.linear.x = kpVelocity*distError;
       ctrlSignal.angular.z = 0;
     }
@@ -134,8 +148,7 @@ private:
     RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Computed output to be %f and %f", ctrlSignal.angular.z, ctrlSignal.linear.x);
   }
 
-  float dirOutput = 0.0f; 
-  float pwrOutput = 0.0f;
+  std::ofstream fout; // for plotting data - columns are (x, y, yaw, euclidean distance)
 
   geometry_msgs::msg::Point currPoint;
   geometry_msgs::msg::Pose currPose;
@@ -144,9 +157,7 @@ private:
   float horizonHeading;
 
   const float kpDirection = 1.1;
-  const float kpVelocity = 0.01;
-
-  float error; // is only linear
+  const float kpVelocity = 0.5;
 
   // control setpoint for desired state
   geometry_msgs::msg::Point goalPoint;
