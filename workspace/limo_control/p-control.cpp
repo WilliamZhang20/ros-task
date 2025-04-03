@@ -41,7 +41,7 @@ public:
     goalState.point.x = std::nanf("");
     goalState.point.y = std::nanf("");
     goalState.point.z = std::nanf("");
-    goalState.pose = -1;
+    goalState.heading = -1;
 
     // For plotting, we store data in a text file
     fout.open("/root/workspace/src/data.txt", std::ios::app);
@@ -118,25 +118,25 @@ private:
       goalState.heading = horizonHeading;
     }
     // If state en route & at point - switch arrived
-    else if(goalState.point.x != std::nanf(""); && distError < 0.02) {
+    else if(goalState.point.x != std::nanf("") && distError < 0.02) {
       goalState.heading = goalPose;
     }
 
     // If FindPoint - adjust angle to horizon heading
-    if(goalState.heading == horizonHeading) {
+    if(goalState.point.x == std::nanf("")) {
       ctrlSignal.angular.z = kpDirection*(std::abs(yaw - horizonHeading));
       ctrlSignal.linear.x = 0; // do not move!
     }
 
     // If EnRoute - adjust speed to not overshoot the point
-    else if(goalState.point.x != std::nanf("");) {
+    else if(goalState.heading != goalPose) {
       RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Moving towards goal with %f to go", distError);
       ctrlSignal.linear.x = kpVelocity*distError;
       ctrlSignal.angular.z = kpDirection*(std::abs(yaw - horizonHeading));
     }
 
     // If arrived - adjust angle to final setpoint
-    else if(goalState.heading == goalPose) {
+    else {
       ctrlSignal.angular.z = kpDirection*(std::abs(dirError));
       ctrlSignal.linear.x = 0; // do not move!
     }
