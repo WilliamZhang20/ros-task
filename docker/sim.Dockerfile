@@ -28,7 +28,13 @@ ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 # Source by default
 RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> /root/.bashrc
 
+USER root
+
 ENV WORKSPACE_PATH=/root/workspace
+
+ENV IGN_RENDERING_API=ogre
+
+RUN apt-get update && apt-get install -y mesa-utils
 
 COPY workspace/ $WORKSPACE_PATH/src/
 

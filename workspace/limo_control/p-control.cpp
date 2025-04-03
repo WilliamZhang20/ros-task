@@ -15,10 +15,9 @@
 #include <iostream>
 #include <string>
 
-enum class TravelState {
-    FindPoint,
-    EnRoute,
-    Arrived
+struct TravelState {
+  geometry_msgs::msg::Point point;
+  float heading;
 };
 
 class RobotControlNode : public rclcpp::Node
@@ -32,14 +31,17 @@ public:
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(10), std::bind(&RobotControlNode::publish_cmd_vel, this));
 
-    goalPoint.x = 9;
-    goalPoint.y = 9;
+    goalPoint.x = 6;
+    goalPoint.y = 8;
     goalPoint.z = 0.3;
     goalPose = 2.3;
 
     horizonHeading = -1;
 
-    goal = TravelState::FindPoint;
+    goalState.point.x = std::nanf("");
+    goalState.point.y = std::nanf("");
+    goalState.point.z = std::nanf("");
+    goalState.pose = -1;
 
     // For plotting, we store data in a text file
     fout.open("/root/workspace/src/data.txt", std::ios::app);
@@ -106,41 +108,35 @@ private:
     double dirError = goalPose - yaw; 
 
     float distError = computeEuclideanDistance();
+    
+    horizonHeading = findPointDirection();
 
     fout << distError << std::endl;
 
-    // If state FindPoint & NaN horizonHeading - determine horizonHeading 
-    if(goal == TravelState::FindPoint) {
-      if(horizonHeading == -1) {
-        horizonHeading = findPointDirection(); 
-        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Computed horizonHeading to be %f", horizonHeading);
-      } // If state FindPoint & are lined up with horizonHeading - switch to en route
-      else if(std::abs(yaw - horizonHeading) < 0.001) {
-        goal = TravelState::EnRoute;
-        RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "About to move!");
-      }
+    // Set initial pose - point not set
+    if(goalState.heading == -1) {
+      goalState.heading = horizonHeading;
     }
-
     // If state en route & at point - switch arrived
-    if(goal == TravelState::EnRoute && distError < 0.02) {
-      goal = TravelState::Arrived;
+    else if(goalState.point.x != std::nanf(""); && distError < 0.02) {
+      goalState.heading = goalPose;
     }
 
     // If FindPoint - adjust angle to horizon heading
-    if(goal == TravelState::FindPoint) {
+    if(goalState.heading == horizonHeading) {
       ctrlSignal.angular.z = kpDirection*(std::abs(yaw - horizonHeading));
       ctrlSignal.linear.x = 0; // do not move!
     }
 
     // If EnRoute - adjust speed to not overshoot the point
-    else if(goal == TravelState::EnRoute) {
+    else if(goalState.point.x != std::nanf("");) {
       RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "Moving towards goal with %f to go", distError);
       ctrlSignal.linear.x = kpVelocity*distError;
-      ctrlSignal.angular.z = 0;
+      ctrlSignal.angular.z = kpDirection*(std::abs(yaw - horizonHeading));
     }
 
     // If arrived - adjust angle to final setpoint
-    else if(goal == TravelState::Arrived) {
+    else if(goalState.heading == goalPose) {
       ctrlSignal.angular.z = kpDirection*(std::abs(dirError));
       ctrlSignal.linear.x = 0; // do not move!
     }
@@ -157,7 +153,7 @@ private:
   float horizonHeading;
 
   const float kpDirection = 1.1;
-  const float kpVelocity = 0.5;
+  const float kpVelocity = 0.3;
 
   // control setpoint for desired state
   geometry_msgs::msg::Point goalPoint;
@@ -166,7 +162,7 @@ private:
   // Output control signal
   geometry_msgs::msg::Twist ctrlSignal{};
 
-  TravelState goal; // determines what to adjust!
+  TravelState goalState; // determines what to adjust!
 
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr publisher_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_;
